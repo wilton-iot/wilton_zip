@@ -1,0 +1,11 @@
+
+EXPORTS
+
+    inflate
+    inflateEnd
+    inflateInit_
+    inflateInit2_
+    zlibVersion
+    zError
+
+    wilton_module_init
