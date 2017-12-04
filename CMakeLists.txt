@@ -8,6 +8,7 @@ project ( wilton_zip CXX )
 if ( STATICLIB_TOOLCHAIN MATCHES "(android|windows)_.+" )
     staticlib_add_subdirectory ( ${STATICLIB_DEPS}/external_zlib )
 endif ( )
+staticlib_add_subdirectory ( ${STATICLIB_DEPS}/staticlib_endian )
 staticlib_add_subdirectory ( ${STATICLIB_DEPS}/staticlib_compress )
 staticlib_add_subdirectory ( ${STATICLIB_DEPS}/staticlib_unzip )
 
@@ -16,9 +17,12 @@ set ( ${PROJECT_NAME}_DEPS
         staticlib_config
         staticlib_support
         staticlib_io
+        staticlib_endian
+        staticlib_compress
         staticlib_utils
         staticlib_json
         staticlib_tinydir
+        staticlib_unzip
         zlib )
 staticlib_pkg_check_modules ( ${PROJECT_NAME}_DEPS_PC REQUIRED ${PROJECT_NAME}_DEPS )
 
