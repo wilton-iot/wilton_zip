@@ -5,7 +5,7 @@ cmake_minimum_required ( VERSION 2.8.12 )
 project ( wilton_zip CXX )
 
 # dependencies add
-if ( STATICLIB_TOOLCHAIN MATCHES "(android|windows)_.+" )
+if ( STATICLIB_TOOLCHAIN MATCHES "(android|windows|macosx)_.+" )
     staticlib_add_subdirectory ( ${STATICLIB_DEPS}/external_zlib )
 endif ( )
 staticlib_add_subdirectory ( ${STATICLIB_DEPS}/staticlib_endian )
