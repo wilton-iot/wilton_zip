@@ -143,20 +143,25 @@ support::buffer write_file(sl::io::span<const char> data) {
             "Required parameter 'path' not specified"));
     if (sl::json::type::nullt == rentries.get().json_type()) throw support::exception(TRACEMSG(
             "Required parameter 'entries' not specified"));
-    if (sl::json::type::object != rentries.get().json_type()) throw support::exception(TRACEMSG(
-            "Parameter 'entries' must be an 'object'," +
+    if (sl::json::type::array != rentries.get().json_type()) throw support::exception(TRACEMSG(
+            "Parameter 'entries' must be an 'array'," +
             " specified type: [" + sl::json::stringify_json_type(rentries.get().json_type()) + "]"));
     const std::string& path = rpath.get();
-    const std::vector<sl::json::field>& entries = rentries.get().as_object();
+    const std::vector<sl::json::value>& entries = rentries.get().as_array();
     // write file
     auto sink = sl::compress::make_zip_sink(sl::tinydir::file_sink(path));
-    for (const sl::json::field& en : entries) {
-        if (sl::json::type::string != en.json_type()) throw support::exception(TRACEMSG(
-                "Parameter 'entries' must be an 'object' with 'string' field values," +
+    for (const sl::json::value& en : entries) {
+        if (sl::json::type::object != en.json_type() || 
+                sl::json::type::string != en["name"].json_type() ||
+                sl::json::type::string != en["value"].json_type()) throw support::exception(TRACEMSG(
+                "Each element of parameter 'entries' must be an 'object'" +
+                " with 'name' and 'value' 'string' fields," +
                 " specified type: [" + sl::json::stringify_json_type(en.json_type()) + "]," +
-                " entry: [" + en.name() + "]"));
-        sink.add_entry(en.name());
-        auto src = sl::io::string_source(en.val().as_string());
+                " entry: [" + en["name"].as_string() + "]"));
+        const std::string& name = en["name"].as_string_nonempty_or_throw();
+        const std::string& val = en["value"].as_string_or_throw();
+        sink.add_entry(name);
+        auto src = sl::io::string_source(val);
         if (hex) {
             sl::io::copy_from_hex(src, sink);
         } else {
