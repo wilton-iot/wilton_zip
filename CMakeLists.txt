@@ -58,6 +58,9 @@ target_compile_options ( ${PROJECT_NAME} PRIVATE ${${PROJECT_NAME}_DEPS_PC_CFLAG
 
 if ( STATICLIB_TOOLCHAIN MATCHES "android_.+" )
     set_property ( TARGET ${PROJECT_NAME} APPEND_STRING PROPERTY LINK_FLAGS "-Wl,-soname,lib${PROJECT_NAME}.so" )
+    get_property ( ${PROJECT_NAME}_LINK_FLAGS TARGET ${PROJECT_NAME} PROPERTY LINK_FLAGS )
+    set_property ( TARGET ${PROJECT_NAME} PROPERTY LINK_FLAGS
+            "-Wl,--whole-archive ${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}/libz.a -Wl,--no-whole-archive ${${PROJECT_NAME}_LINK_FLAGS}" )
 elseif ( STATICLIB_TOOLCHAIN MATCHES "windows_.+" )
     target_link_libraries ( ${PROJECT_NAME} PRIVATE wtsapi32 )
     set_property ( TARGET ${PROJECT_NAME} APPEND_STRING PROPERTY LINK_FLAGS "/manifest:no" )
