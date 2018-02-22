@@ -184,7 +184,7 @@ support::buffer write_file(sl::io::span<const char> data) {
             sl::io::copy_all(src, sink);
         }
     }
-    return support::make_empty_buffer();
+    return support::make_null_buffer();
 }
 
 } // namespace
