@@ -17,6 +17,9 @@ cmake_minimum_required ( VERSION 2.8.12 )
 # project
 project ( wilton_zip CXX )
 
+# options
+set ( external_zlib_ENABLE_PRECONFIGURATION ON CACHE BOOL "" )
+
 # dependencies add
 if ( STATICLIB_TOOLCHAIN MATCHES "(android|windows|macosx)_.+" )
     staticlib_add_subdirectory ( ${STATICLIB_DEPS}/external_zlib )
