@@ -22,6 +22,7 @@
  */
 
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -34,10 +35,83 @@
 
 #include "wilton/support/buffer.hpp"
 #include "wilton/support/exception.hpp"
+#include "wilton/support/logging.hpp"
 #include "wilton/support/registrar.hpp"
+#include "wilton/support/tl_registry.hpp"
 
 namespace wilton {
 namespace zip {
+
+namespace { //anonymous
+
+const std::string logger = std::string("wilton.zip");
+
+std::vector<std::string> extract_entry_names(const std::vector<sl::json::value>& enames) {
+    if (0 == enames.size()) {
+        throw support::exception(TRACEMSG("Invalid empty list of entries specified"));
+    }
+    auto res = std::vector<std::string>();
+    res.reserve(enames.size());
+    for (auto& el : enames) {
+        const std::string& name = el.as_string_nonempty_or_throw("entries");
+        res.emplace_back(std::string(name.data(), name.length()));
+    }
+    return res;
+}
+
+class zip_file_writer {
+    std::unique_ptr<sl::compress::zip_sink<sl::tinydir::file_sink>> sink;
+    std::vector<std::string> entry_names;
+    bool hex;
+    size_t idx = 0;
+
+public:
+    zip_file_writer(const std::string& path, const std::vector<sl::json::value>& enames, bool hex_format) :
+    sink(new sl::compress::zip_sink<sl::tinydir::file_sink>(sl::tinydir::file_sink(path))),
+    entry_names(extract_entry_names(enames)),
+    hex(hex_format) { }
+
+    zip_file_writer(const zip_file_writer&) = delete;
+
+    zip_file_writer& operator=(const zip_file_writer&) = delete;
+
+    zip_file_writer(zip_file_writer&& other) :
+    sink(std::move(other.sink)),
+    entry_names(std::move(other.entry_names)),
+    hex(other.hex),
+    idx(other.idx) {
+        other.hex = false;
+        other.idx = 0;
+    }
+
+    zip_file_writer& operator=(zip_file_writer&& other) = delete;
+
+    const std::string& next_entry_name() {
+        if (idx >= entry_names.size()) {
+            throw support::exception(TRACEMSG("Entries number threshold exceeded," +
+                    " idx: [" + sl::support::to_string(idx) + "]"));
+        }
+        auto& res = entry_names.at(this->idx);
+        this->idx = this->idx + 1;
+        return res;
+    }
+
+    sl::compress::zip_sink<sl::tinydir::file_sink>& get_sink() {
+        return *sink.get();
+    }
+
+    bool is_hex() {
+        return hex;
+    }
+};
+
+// initialized from wilton_module_init
+std::shared_ptr<support::tl_registry<zip_file_writer>> local_registry() {
+    static auto registry = std::make_shared<support::tl_registry<zip_file_writer>>();
+    return registry;
+}
+
+} // namespace
 
 support::buffer read_file(sl::io::span<const char> data) {
     // json parse
@@ -137,7 +211,7 @@ support::buffer list_file_entries(sl::io::span<const char> data) {
     return support::make_json_buffer(std::move(res));
 }
 
-support::buffer write_file(sl::io::span<const char> data) {
+support::buffer open_tl_file_writer(sl::io::span<const char> data) {
     // json parse
     auto json = sl::json::load(data);
     auto rpath = std::ref(sl::utils::empty_string());
@@ -164,26 +238,43 @@ support::buffer write_file(sl::io::span<const char> data) {
             " specified type: [" + sl::json::stringify_json_type(rentries.get().json_type()) + "]"));
     const std::string& path = rpath.get();
     const std::vector<sl::json::value>& entries = rentries.get().as_array();
-    // write file
-    auto sink = sl::compress::make_zip_sink(sl::tinydir::file_sink(path));
-    for (const sl::json::value& en : entries) {
-        if (sl::json::type::object != en.json_type() || 
-                sl::json::type::string != en["name"].json_type() ||
-                sl::json::type::string != en["value"].json_type()) throw support::exception(TRACEMSG(
-                "Each element of parameter 'entries' must be an 'object'" +
-                " with 'name' and 'value' 'string' fields," +
-                " specified type: [" + sl::json::stringify_json_type(en.json_type()) + "]," +
-                " entry: [" + en["name"].as_string() + "]"));
-        const std::string& name = en["name"].as_string_nonempty_or_throw();
-        const std::string& val = en["value"].as_string_or_throw();
-        sink.add_entry(name);
-        auto src = sl::io::string_source(val);
-        if (hex) {
-            sl::io::copy_from_hex(src, sink);
-        } else {
-            sl::io::copy_all(src, sink);
-        }
+    // create writer
+    auto reg = local_registry();
+    auto writer = zip_file_writer(path, entries, hex);
+    reg->put(std::move(writer));
+    wilton::support::log_debug(logger, std::string("TL ZIP file writer opened,") + 
+            " path: [" + path + "], entries: [" + json["entries"].dumps() + "]");
+    return support::make_null_buffer();
+}
+
+support::buffer write_tl_entry_content(sl::io::span<const char> data) {
+    auto reg = local_registry();
+    auto& writer = reg->peek();
+    auto& sink = writer.get_sink();
+    auto& name = writer.next_entry_name();
+    wilton::support::log_debug(logger, std::string("Writing TL ZIP entry,") + 
+            " name: [" + name + "]");
+    sink.add_entry(name);
+    auto src = sl::io::array_source(data.data(), data.size());
+    size_t written = 0;
+    if (writer.is_hex()) {
+        written = sl::io::copy_from_hex(src, sink);
+    } else {
+        written = sl::io::copy_all(src, sink);
     }
+    wilton::support::log_debug(logger, std::string("TL ZIP entry written,") + 
+            " bytes: [" + sl::support::to_string(written) + "]");
+    return support::make_null_buffer();
+}
+
+support::buffer close_tl_file_writer(sl::io::span<const char>) {
+    auto reg = local_registry();
+    {
+        // will be destroyed at the end of scope
+        // no reinsertion logic on unlikely error
+        auto writer = reg->remove();
+    }
+    wilton::support::log_debug(logger, std::string("TL ZIP file writer closed,"));
     return support::make_null_buffer();
 }
 
@@ -192,10 +283,13 @@ support::buffer write_file(sl::io::span<const char> data) {
 
 extern "C" char* wilton_module_init() {
     try {
+        wilton::zip::local_registry();
         wilton::support::register_wiltoncall("zip_read_file", wilton::zip::read_file);
         wilton::support::register_wiltoncall("zip_read_file_entry", wilton::zip::read_file_entry);
         wilton::support::register_wiltoncall("zip_list_file_entries", wilton::zip::list_file_entries);
-        wilton::support::register_wiltoncall("zip_write_file", wilton::zip::write_file);
+        wilton::support::register_wiltoncall("zip_open_tl_file_writer", wilton::zip::open_tl_file_writer);
+        wilton::support::register_wiltoncall("zip_write_tl_entry_content", wilton::zip::write_tl_entry_content);
+        wilton::support::register_wiltoncall("zip_close_tl_file_writer", wilton::zip::close_tl_file_writer);
         return nullptr;
     } catch (const std::exception& e) {
         return wilton::support::alloc_copy(TRACEMSG(e.what() + "\nException raised"));
