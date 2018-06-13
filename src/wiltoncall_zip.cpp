@@ -136,10 +136,11 @@ support::buffer read_file(sl::io::span<const char> data) {
     auto res = std::vector<sl::json::field>();
     for (auto& en : idx.get_entries()) {
         auto stream = sl::unzip::open_zip_entry(idx, en);
-        auto src = sl::io::streambuf_source(stream.get());
+        auto src = sl::io::streambuf_source(stream->rdbuf());
         auto sink = sl::io::string_sink();
         if (hex) {
-            sl::io::copy_to_hex(src, sink);
+            auto hexer = sl::io::make_hex_sink(sink);
+            sl::io::copy_all(src, hexer);
         } else {
             sl::io::copy_all(src, sink);
         }
@@ -179,7 +180,7 @@ support::buffer read_file_entry(sl::io::span<const char> data) {
     if (en.is_empty()) throw support::exception(TRACEMSG(
             "Invalid ZIP entry specified: [" + entry + "], file: [" + path + "]"));
     auto stream = sl::unzip::open_zip_entry(idx, entry);
-    auto src = sl::io::streambuf_source(stream.get());
+    auto src = sl::io::streambuf_source(stream->rdbuf());
     if (hex) {
         return support::make_hex_buffer(src);
     } else {
@@ -258,7 +259,8 @@ support::buffer write_tl_entry_content(sl::io::span<const char> data) {
     auto src = sl::io::array_source(data.data(), data.size());
     size_t written = 0;
     if (writer.is_hex()) {
-        written = sl::io::copy_from_hex(src, sink);
+        auto unhexer = sl::io::make_hex_source(src);
+        written = sl::io::copy_all(unhexer, sink);
     } else {
         written = sl::io::copy_all(src, sink);
     }
