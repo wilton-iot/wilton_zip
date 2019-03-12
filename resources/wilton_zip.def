@@ -14,10 +14,16 @@
 
 EXPORTS
 
+    crc32
+    deflate
+    deflateEnd
+    deflateInit_
+    deflateReset
     inflate
     inflateEnd
     inflateInit_
     inflateInit2_
+    inflateReset
     zlibVersion
     zError
 
