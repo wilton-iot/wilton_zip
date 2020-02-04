@@ -63,13 +63,16 @@ class zip_file_writer {
     std::unique_ptr<sl::compress::zip_sink<sl::tinydir::file_sink>> sink;
     std::vector<std::string> entry_names;
     bool hex;
+    bool fs_paths;
     size_t idx = 0;
 
 public:
-    zip_file_writer(const std::string& path, const std::vector<sl::json::value>& enames, bool hex_format) :
+    zip_file_writer(const std::string& path, const std::vector<sl::json::value>& enames,
+            bool hex_format, bool use_fs_paths) :
     sink(new sl::compress::zip_sink<sl::tinydir::file_sink>(sl::tinydir::file_sink(path))),
     entry_names(extract_entry_names(enames)),
-    hex(hex_format) { }
+    hex(hex_format),
+    fs_paths(use_fs_paths) { }
 
     zip_file_writer(const zip_file_writer&) = delete;
 
@@ -79,8 +82,10 @@ public:
     sink(std::move(other.sink)),
     entry_names(std::move(other.entry_names)),
     hex(other.hex),
+    fs_paths(other.fs_paths),
     idx(other.idx) {
         other.hex = false;
+        other.fs_paths = false;
         other.idx = 0;
     }
 
@@ -102,6 +107,10 @@ public:
 
     bool is_hex() {
         return hex;
+    }
+
+    bool use_fs_paths() {
+        return fs_paths;
     }
 };
 
@@ -218,6 +227,7 @@ support::buffer open_tl_file_writer(sl::io::span<const char> data) {
     auto rpath = std::ref(sl::utils::empty_string());
     auto rentries = std::ref(sl::json::null_value_ref());
     auto hex = false;
+    auto fs_paths = false;
     for (const sl::json::field& fi : json.as_object()) {
         auto& name = fi.name();
         if ("path" == name) {
@@ -226,6 +236,8 @@ support::buffer open_tl_file_writer(sl::io::span<const char> data) {
             rentries = fi.val();
         } else if ("hex" == name) {
             hex = fi.as_bool_or_throw(name);
+        } else if ("fsPaths" == name) {
+            fs_paths = fi.as_bool_or_throw(name);
         } else {
             throw support::exception(TRACEMSG("Unknown data field: [" + name + "]"));
         }
@@ -241,7 +253,7 @@ support::buffer open_tl_file_writer(sl::io::span<const char> data) {
     const std::vector<sl::json::value>& entries = rentries.get().as_array();
     // create writer
     auto reg = local_registry();
-    auto writer = zip_file_writer(path, entries, hex);
+    auto writer = zip_file_writer(path, entries, hex, fs_paths);
     reg->put(std::move(writer));
     wilton::support::log_debug(logger, std::string("TL ZIP file writer opened,") + 
             " path: [" + path + "], entries: [" + json["entries"].dumps() + "]");
@@ -256,12 +268,17 @@ support::buffer write_tl_entry_content(sl::io::span<const char> data) {
     wilton::support::log_debug(logger, std::string("Writing TL ZIP entry,") + 
             " name: [" + name + "]");
     sink.add_entry(name);
-    auto src = sl::io::array_source(data.data(), data.size());
     size_t written = 0;
     if (writer.is_hex()) {
+        auto src = sl::io::array_source(data.data(), data.size());
         auto unhexer = sl::io::make_hex_source(src);
         written = sl::io::copy_all(unhexer, sink);
+    } else if (writer.use_fs_paths()) {
+        auto path = std::string(data.data(), data.size());
+        auto src = sl::tinydir::file_source(path);
+        written = sl::io::copy_all(src, sink);
     } else {
+        auto src = sl::io::array_source(data.data(), data.size());
         written = sl::io::copy_all(src, sink);
     }
     wilton::support::log_debug(logger, std::string("TL ZIP entry written,") + 
