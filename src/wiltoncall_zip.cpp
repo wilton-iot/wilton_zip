@@ -274,9 +274,12 @@ support::buffer write_tl_entry_content(sl::io::span<const char> data) {
         auto unhexer = sl::io::make_hex_source(src);
         written = sl::io::copy_all(unhexer, sink);
     } else if (writer.use_fs_paths()) {
-        auto path = std::string(data.data(), data.size());
-        auto src = sl::tinydir::file_source(path);
-        written = sl::io::copy_all(src, sink);
+        // write file contents skipping dir entries
+        if (!(name.length() > 0 && '/' == name.back())) {
+            auto path = std::string(data.data(), data.size());
+            auto src = sl::tinydir::file_source(path);
+            written = sl::io::copy_all(src, sink);
+        }
     } else {
         auto src = sl::io::array_source(data.data(), data.size());
         written = sl::io::copy_all(src, sink);
