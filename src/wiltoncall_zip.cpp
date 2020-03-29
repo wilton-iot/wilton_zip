@@ -197,6 +197,64 @@ support::buffer read_file_entry(sl::io::span<const char> data) {
     }
 }
 
+support::buffer unzip_file_entries(sl::io::span<const char> data) {
+    // json parse
+    auto json = sl::json::load(data);
+    auto rpath = std::ref(sl::utils::empty_string());
+    auto rroot = std::ref(sl::utils::empty_string());
+    // std::ref doesn't work here
+    auto pentries = sl::support::observer_ptr<const std::vector<sl::json::field>>();
+    for (const sl::json::field& fi : json.as_object()) {
+        auto& name = fi.name();
+        if ("path" == name) {
+            rpath = fi.as_string_nonempty_or_throw(name);
+        } else if ("destRoot" == name) {
+            rroot = fi.as_string_nonempty_or_throw(name);
+        } else if ("entries" == name) {
+            pentries.reset(std::addressof(fi.as_object_or_throw(name)));
+        } else {
+            throw support::exception(TRACEMSG("Unknown data field: [" + name + "]"));
+        }
+    }
+    if (rpath.get().empty()) throw support::exception(TRACEMSG(
+            "Required parameter 'path' not specified"));
+    if (!pentries.has_value()) throw support::exception(TRACEMSG(
+            "Required parameter 'entries' not specified"));
+    if (0 == pentries->size()) throw support::exception(TRACEMSG(
+            "Required parameter 'entries' is empty"));
+    for (auto& en : *pentries.get()) {
+        if (sl::json::type::string != en.json_type()) {
+            throw support::exception(TRACEMSG("Invalid entry specified," +
+                    " name: [" + en.name() + "]," +
+                    " must contain 'src_path_in_zip' -> 'dest_path_in_fs' mapping"));
+        }
+    }
+    const std::string& path = rpath.get();
+    const std::string& root = rroot.get();
+    const std::vector<sl::json::field>& entries = *pentries.get();
+    // read file
+    auto idx = sl::unzip::file_index(path);
+    // create dest root dir if specified
+    if (!root.empty()) {
+        sl::tinydir::create_directory(root);
+    }
+    // unzip entries to files
+    for (auto& en : entries) {
+        auto& name = en.name();
+        auto& path = en.as_string_or_throw(name);
+        if (!(name.length() > 0 && '/' == name.back())) {
+            auto stream = sl::unzip::open_zip_entry(idx, name);
+            auto src = sl::io::streambuf_source(stream->rdbuf());
+            auto file = sl::tinydir::file_sink(path);
+            auto dest = sl::io::make_buffered_sink(file);
+            sl::io::copy_all(src, dest);
+        } else {
+            sl::tinydir::create_directory(path);
+        }
+    }
+    return support::make_null_buffer();
+}
+
 support::buffer list_file_entries(sl::io::span<const char> data) {
     // json parse
     auto json = sl::json::load(data);
@@ -308,6 +366,7 @@ extern "C" char* wilton_module_init() {
         wilton::zip::local_registry();
         wilton::support::register_wiltoncall("zip_read_file", wilton::zip::read_file);
         wilton::support::register_wiltoncall("zip_read_file_entry", wilton::zip::read_file_entry);
+        wilton::support::register_wiltoncall("zip_unzip_file_entries", wilton::zip::unzip_file_entries);
         wilton::support::register_wiltoncall("zip_list_file_entries", wilton::zip::list_file_entries);
         wilton::support::register_wiltoncall("zip_open_tl_file_writer", wilton::zip::open_tl_file_writer);
         wilton::support::register_wiltoncall("zip_write_tl_entry_content", wilton::zip::write_tl_entry_content);
