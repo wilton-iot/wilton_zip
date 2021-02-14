@@ -26,6 +26,8 @@
 #include <string>
 #include <vector>
 
+#include "utf8.h"
+
 #include "staticlib/compress.hpp"
 #include "staticlib/json.hpp"
 #include "staticlib/support.hpp"
@@ -146,14 +148,26 @@ support::buffer read_file(sl::io::span<const char> data) {
     for (auto& en : idx.get_entries()) {
         auto stream = sl::unzip::open_zip_entry(idx, en);
         auto src = sl::io::streambuf_source(stream->rdbuf());
-        auto sink = sl::io::string_sink();
-        if (hex) {
-            auto hexer = sl::io::make_hex_sink(sink);
-            sl::io::copy_all(src, hexer);
-        } else {
+        auto fi = sl::json::field();
+        if (!hex) {
+            auto sink = sl::io::string_sink();
             sl::io::copy_all(src, sink);
+            auto& str_raw = sink.get_string();
+            if (utf8::is_valid(str_raw.begin(), str_raw.end())) {
+                fi = sl::json::field(en, std::move(str_raw));
+            } else {
+                auto str_utf8 = std::string();
+                utf8::replace_invalid(str_raw.begin(), str_raw.end(), std::back_inserter(str_utf8));
+                fi = sl::json::field(en, std::move(str_utf8));
+            }
+        } else {
+            auto sink = sl::io::string_sink();
+            {
+                auto hexer = sl::io::make_hex_sink(sink);
+                sl::io::copy_all(src, hexer);
+            }
+            fi = sl::json::field(en, std::move(sink.get_string()));
         }
-        auto fi = sl::json::field(en, std::move(sink.get_string()));
         res.emplace_back(std::move(fi));
     }
     return support::make_json_buffer(std::move(res));
@@ -190,10 +204,20 @@ support::buffer read_file_entry(sl::io::span<const char> data) {
             "Invalid ZIP entry specified: [" + entry + "], file: [" + path + "]"));
     auto stream = sl::unzip::open_zip_entry(idx, entry);
     auto src = sl::io::streambuf_source(stream->rdbuf());
-    if (hex) {
-        return support::make_hex_buffer(src);
+    if (!hex) {
+        auto buf = support::make_source_buffer(src);
+        if (utf8::is_valid(buf.begin(), buf.end())) {
+            return buf;
+        } else {
+            auto deferred = sl::support::defer([buf]() STATICLIB_NOEXCEPT {
+                wilton_free(buf.data());
+            });
+            auto str_utf8 = std::string();
+            utf8::replace_invalid(buf.begin(), buf.end(), std::back_inserter(str_utf8));
+            return support::make_string_buffer(str_utf8);
+        }
     } else {
-        return support::make_source_buffer(src);
+        return support::make_hex_buffer(src);
     }
 }
 
