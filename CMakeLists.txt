@@ -21,6 +21,7 @@ project ( wilton_zip CXX )
 set ( external_zlib_ENABLE_PRECONFIGURATION ON CACHE BOOL "" )
 
 # dependencies add
+staticlib_add_subdirectory ( ${STATICLIB_DEPS}/external_utf8cpp )
 if ( STATICLIB_TOOLCHAIN MATCHES "(android|windows|macosx)_.+" )
     staticlib_add_subdirectory ( ${STATICLIB_DEPS}/external_zlib )
 endif ( )
